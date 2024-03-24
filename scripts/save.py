@@ -64,7 +64,7 @@ def load_env(label, headless=False):
     Cfg.domain_rand.randomize_com_displacement = False
 
     Cfg.env.num_recording_envs = 1
-    Cfg.env.num_envs = 500
+    Cfg.env.num_envs = 5000
     Cfg.terrain.num_rows = 5
     Cfg.terrain.num_cols = 5
     Cfg.terrain.border_size = 0
@@ -121,17 +121,31 @@ def save(headless=True):
     dataset = {}
     state_ = []
     action_ = []
+    reward_ = []
     timeout_ = None
-    episodes = 5 # 100eps/episode
+    episodes = 10
 
-    gait_emb = [0,0,1]
-    dir_emb = [0,0,1,0]
+    state_path = "/home/kdyun/Desktop/dataset/buffer/state.npy"
+    action_path = "/home/kdyun/Desktop/dataset/buffer/action.npy"
+    reward_path = "/home/kdyun/Desktop/dataset/buffer/reward.npy"
+
+    state_ = np.memmap(state_path, dtype='float32', mode='w+', shape=(num_eval_steps * num_envs * episodes, 42))
+    action_ = np.memmap(action_path, dtype='float32', mode='w+', shape=(num_eval_steps * num_envs * episodes, 12))
+    reward_ = np.memmap(reward_path, dtype='float32', mode='w+', shape=(num_eval_steps * num_envs * episodes, 4))
+    length = 0
 
     for episode in range(episodes):
-        footswing_height_cmd = random.uniform(0.06, 0.09)
+        x_vel_cmd = torch.tensor([random.uniform(-1.5, 1.5) for _ in range(num_envs)])
+        y_vel_cmd = torch.tensor([random.uniform(-1.5, 1.5) for _ in range(num_envs)])
+        yaw_vel_cmd = torch.tensor([random.uniform(-0.5, 0.5) for _ in range(num_envs)])
+
+        gait_index = [random.choice(range(len(gaits))) for _ in range(num_envs)]
+        random_gaits = [list(gaits.values())[idx] for idx in gait_index]
+        gait = torch.tensor(random_gaits)
 
         recorded_obs = []
         recorded_acts = []
+        recorded_rewards = []
 
         done_envs = []
 
@@ -139,20 +153,22 @@ def save(headless=True):
         for i in tqdm(range(num_eval_steps)):
             with torch.no_grad():
                 actions = policy(obs)
-            env.commands[:, 0] = x_vel_cmd
-            env.commands[:, 1] = y_vel_cmd
-            env.commands[:, 2] = yaw_vel_cmd
-            env.commands[:, 3] = body_height_cmd
-            env.commands[:, 4] = step_frequency_cmd
-            env.commands[:, 5:8] = gait
-            env.commands[:, 8] = 0.5
-            env.commands[:, 9] = footswing_height_cmd
-            env.commands[:, 10] = pitch_cmd
-            env.commands[:, 11] = roll_cmd
-            env.commands[:, 12] = stance_width_cmd
-            obs, rew, done, info = env.step(actions)
 
-            if True in done: print("here")
+                env.commands[:, 0] = x_vel_cmd
+                env.commands[:, 1] = y_vel_cmd
+                env.commands[:, 2] = yaw_vel_cmd
+                env.commands[:, 3] = body_height_cmd
+                env.commands[:, 4] = step_frequency_cmd
+                env.commands[:, 5:8] = gait
+                env.commands[:, 8] = 0.5
+                env.commands[:, 9] = footswing_height_cmd
+                env.commands[:, 10] = pitch_cmd
+                env.commands[:, 11] = roll_cmd
+                env.commands[:, 12] = stance_width_cmd
+
+                obs, rew, done, info = env.step(actions)
+
+            # if True in done: print("here")
 
             done_indices = [index for index, value in enumerate(done) if value]
             for ind in done_indices:
@@ -162,15 +178,23 @@ def save(headless=True):
             this_obs = torch.cat([ env.root_states[:,2:3].detach().cpu(), env.root_states[:,3:7].detach().cpu(),
                                         env.root_states[:,7:10].detach().cpu(), env.base_ang_vel[:,:].detach().cpu(),
                                         env.projected_gravity.detach().cpu(), env.clock_inputs.detach().cpu(),
-                                        env.dof_pos[:,:12].detach().cpu(), env.dof_vel[:,:12].detach().cpu()], dim=-1)
+                                        env.dof_pos[:,:12].detach().cpu(), env.dof_vel[:,:12].detach().cpu()], dim=-1) # (500,42)
+            this_reward = torch.stack([torch.tensor(gait_index), x_vel_cmd, y_vel_cmd, yaw_vel_cmd], dim=-1) # (500,4) size this_reward
+
             recorded_obs.append(this_obs)
             recorded_acts.append(actions)
+            recorded_rewards.append(this_reward)
 
-        recorded_obs = torch.stack(recorded_obs, dim=1)
+            del this_obs
+            del this_reward
+
+        recorded_obs = torch.stack(recorded_obs, dim=1) # 250*(500,42) -> (500,250,42)
         recorded_acts = torch.stack(recorded_acts, dim=1)
+        recorded_rewards = torch.stack(recorded_rewards, dim=1)
 
         sliced_obs = []
         sliced_acts = []
+        sliced_rewards = []
         if len(done_envs) != 0:
             done_envs.sort()
             done_envs = [0] + done_envs + [env.num_envs]
@@ -182,33 +206,62 @@ def save(headless=True):
             for a,b in slice_indices:
                 sliced_obs.append(recorded_obs[a:b,:,:])
                 sliced_acts.append(recorded_acts[a:b,:,:])
+                sliced_rewards.append(recorded_rewards[a:b,:,:])
 
         if len(sliced_obs) != 0:
             recorded_obs = torch.cat(sliced_obs, axis=0)
             recorded_acts = torch.cat(sliced_acts, axis=0)
+            recorded_rewards = torch.cat(sliced_rewards, axis=0)
+
+        del sliced_obs, sliced_acts, sliced_rewards
 
         recorded_obs = recorded_obs.view(-1, 42)
         recorded_acts = recorded_acts.view(-1, 12)
+        recorded_rewards = recorded_rewards.view(-1, 4)
 
-        state_.append(recorded_obs)
-        action_.append(recorded_acts)
+        added_length = recorded_obs.shape[0]
 
-    state_ = torch.cat(state_, dim=0)
-    action_ = torch.cat(action_, dim=0)
+        # state_.append(recorded_obs)
+        # action_.append(recorded_acts)
+        # reward_.append(recorded_rewards)
+        state_[length:length + added_length, :] = recorded_obs.detach().cpu().numpy()
+        action_[length:length + added_length, :] = recorded_acts.detach().cpu().numpy()
+        reward_[length:length + added_length, :] = recorded_rewards.detach().cpu().numpy()
 
-    state_ = state_.view(-1, 42)
-    action_ = action_.view(-1, 12)
-    state_ = state_.detach().cpu().numpy()
-    action_ = action_.detach().cpu().numpy()
+        del recorded_obs, recorded_acts, recorded_rewards
+        length += added_length
+
+        state_.flush()
+        action_.flush()
+        reward_.flush()
+
+    # state_ = torch.cat(state_, dim=0)
+    # action_ = torch.cat(action_, dim=0)
+    # reward_ = torch.cat(reward_, dim=0)
+
+    state_ = np.array(state_[:length,:])
+    action_ = np.array(action_[:length,:])
+    reward_ = np.array(reward_[:length,:])
+
+    # state_ = state_.view(-1, 42)
+    # action_ = action_.view(-1, 12)
+    # reward_ = reward_.view(-1, 4)
+
+    # state_ = state_.detach().cpu().numpy()
+    # action_ = action_.detach().cpu().numpy()
+    # reward_ = reward_.detach().cpu().numpy()
 
     dataset['actions'] = action_
     dataset['observations'] = state_
     # dataset['rewards'] = np.array([0.9 for i in range(state_.shape[0])])
-    dataset['rewards'] = np.array([(gait_emb + dir_emb) for i in range(state_.shape[0])])
+    # dataset['rewards'] = np.array([(gait_emb + dir_emb) for i in range(state_.shape[0])])
+    dataset['rewards'] = reward_
     timeouts = [False for i in range(249)] + [True]
     dataset['terminals'] = np.array([False for i in range(state_.shape[0])])
     true_eps = int(state_.shape[0] / 250)
     dataset['timeouts'] = np.array(timeouts * true_eps)
+
+    del state_, action_, reward_
 
     file_path = os.path.expanduser('~/Desktop/data.pkl')
     with open(file_path, 'wb') as f:
