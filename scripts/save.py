@@ -125,15 +125,6 @@ def save(headless=True):
     timeout_ = None
     episodes = 10
 
-    state_path = "/home/kdyun/Desktop/dataset/buffer/state.npy"
-    action_path = "/home/kdyun/Desktop/dataset/buffer/action.npy"
-    reward_path = "/home/kdyun/Desktop/dataset/buffer/reward.npy"
-
-    state_ = np.memmap(state_path, dtype='float32', mode='w+', shape=(num_eval_steps * num_envs * episodes, 42))
-    action_ = np.memmap(action_path, dtype='float32', mode='w+', shape=(num_eval_steps * num_envs * episodes, 12))
-    reward_ = np.memmap(reward_path, dtype='float32', mode='w+', shape=(num_eval_steps * num_envs * episodes, 4))
-    length = 0
-
     for episode in range(episodes):
         x_vel_cmd = torch.tensor([random.uniform(-1.5, 1.5) for _ in range(num_envs)])
         y_vel_cmd = torch.tensor([random.uniform(-1.5, 1.5) for _ in range(num_envs)])
@@ -185,8 +176,7 @@ def save(headless=True):
             recorded_acts.append(actions)
             recorded_rewards.append(this_reward)
 
-            del this_obs
-            del this_reward
+            del this_obs, this_reward
 
         recorded_obs = torch.stack(recorded_obs, dim=1) # 250*(500,42) -> (500,250,42)
         recorded_acts = torch.stack(recorded_acts, dim=1)
@@ -219,37 +209,23 @@ def save(headless=True):
         recorded_acts = recorded_acts.view(-1, 12)
         recorded_rewards = recorded_rewards.view(-1, 4)
 
-        added_length = recorded_obs.shape[0]
-
-        # state_.append(recorded_obs)
-        # action_.append(recorded_acts)
-        # reward_.append(recorded_rewards)
-        state_[length:length + added_length, :] = recorded_obs.detach().cpu().numpy()
-        action_[length:length + added_length, :] = recorded_acts.detach().cpu().numpy()
-        reward_[length:length + added_length, :] = recorded_rewards.detach().cpu().numpy()
+        state_.append(recorded_obs)
+        action_.append(recorded_acts)
+        reward_.append(recorded_rewards)
 
         del recorded_obs, recorded_acts, recorded_rewards
-        length += added_length
 
-        state_.flush()
-        action_.flush()
-        reward_.flush()
+    state_ = torch.cat(state_, dim=0)
+    action_ = torch.cat(action_, dim=0)
+    reward_ = torch.cat(reward_, dim=0)
 
-    # state_ = torch.cat(state_, dim=0)
-    # action_ = torch.cat(action_, dim=0)
-    # reward_ = torch.cat(reward_, dim=0)
+    state_ = state_.view(-1, 42)
+    action_ = action_.view(-1, 12)
+    reward_ = reward_.view(-1, 4)
 
-    state_ = np.array(state_[:length,:])
-    action_ = np.array(action_[:length,:])
-    reward_ = np.array(reward_[:length,:])
-
-    # state_ = state_.view(-1, 42)
-    # action_ = action_.view(-1, 12)
-    # reward_ = reward_.view(-1, 4)
-
-    # state_ = state_.detach().cpu().numpy()
-    # action_ = action_.detach().cpu().numpy()
-    # reward_ = reward_.detach().cpu().numpy()
+    state_ = state_.detach().cpu().numpy()
+    action_ = action_.detach().cpu().numpy()
+    reward_ = reward_.detach().cpu().numpy()
 
     dataset['actions'] = action_
     dataset['observations'] = state_
