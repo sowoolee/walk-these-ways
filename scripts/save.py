@@ -64,7 +64,7 @@ def load_env(label, headless=False):
     Cfg.domain_rand.randomize_com_displacement = False
 
     Cfg.env.num_recording_envs = 1
-    Cfg.env.num_envs = 5000
+    Cfg.env.num_envs = 500
     Cfg.terrain.num_rows = 5
     Cfg.terrain.num_cols = 5
     Cfg.terrain.border_size = 0
@@ -176,8 +176,6 @@ def save(headless=True):
             recorded_acts.append(actions)
             recorded_rewards.append(this_reward)
 
-            del this_obs, this_reward
-
         recorded_obs = torch.stack(recorded_obs, dim=1) # 250*(500,42) -> (500,250,42)
         recorded_acts = torch.stack(recorded_acts, dim=1)
         recorded_rewards = torch.stack(recorded_rewards, dim=1)
@@ -203,8 +201,6 @@ def save(headless=True):
             recorded_acts = torch.cat(sliced_acts, axis=0)
             recorded_rewards = torch.cat(sliced_rewards, axis=0)
 
-        del sliced_obs, sliced_acts, sliced_rewards
-
         recorded_obs = recorded_obs.view(-1, 42)
         recorded_acts = recorded_acts.view(-1, 12)
         recorded_rewards = recorded_rewards.view(-1, 4)
@@ -212,8 +208,6 @@ def save(headless=True):
         state_.append(recorded_obs)
         action_.append(recorded_acts)
         reward_.append(recorded_rewards)
-
-        del recorded_obs, recorded_acts, recorded_rewards
 
     state_ = torch.cat(state_, dim=0)
     action_ = torch.cat(action_, dim=0)
@@ -236,8 +230,6 @@ def save(headless=True):
     dataset['terminals'] = np.array([False for i in range(state_.shape[0])])
     true_eps = int(state_.shape[0] / 250)
     dataset['timeouts'] = np.array(timeouts * true_eps)
-
-    del state_, action_, reward_
 
     file_path = os.path.expanduser('~/Desktop/data.pkl')
     with open(file_path, 'wb') as f:
