@@ -64,7 +64,7 @@ def load_env(label, headless=False):
     Cfg.domain_rand.randomize_com_displacement = False
 
     Cfg.env.num_recording_envs = 1
-    Cfg.env.num_envs = 500
+    Cfg.env.num_envs = 1250
     Cfg.terrain.num_rows = 5
     Cfg.terrain.num_cols = 5
     Cfg.terrain.border_size = 0
@@ -126,11 +126,12 @@ def save(headless=True):
     episodes = 10
 
     for episode in range(episodes):
-        x_vel_cmd = torch.tensor([random.uniform(-1.5, 1.5) for _ in range(num_envs)])
+        x_vel_cmd = torch.tensor([random.uniform(-3.0, 3.0) for _ in range(num_envs)])
         y_vel_cmd = torch.tensor([random.uniform(-1.5, 1.5) for _ in range(num_envs)])
-        yaw_vel_cmd = torch.tensor([random.uniform(-0.5, 0.5) for _ in range(num_envs)])
+        yaw_vel_cmd = torch.tensor([random.uniform(-0.8, 0.8) for _ in range(num_envs)])
 
-        gait_index = [random.choice(range(len(gaits))) for _ in range(num_envs)]
+        # gait_index = [random.choice(range(len(gaits))) for _ in range(num_envs)]
+        gait_index = [0 for _ in range(num_envs)] # just for one gait
         random_gaits = [list(gaits.values())[idx] for idx in gait_index]
         gait = torch.tensor(random_gaits)
 
@@ -166,10 +167,10 @@ def save(headless=True):
                 if ind not in done_envs:
                     done_envs.append(ind)
 
-            this_obs = torch.cat([ env.root_states[:,2:3].detach().cpu(), env.root_states[:,3:7].detach().cpu(),
+            this_obs = torch.cat([ env.root_states[:,0:3].detach().cpu(), env.root_states[:,3:7].detach().cpu(),
                                         env.root_states[:,7:10].detach().cpu(), env.base_ang_vel[:,:].detach().cpu(),
-                                        env.projected_gravity.detach().cpu(), env.clock_inputs.detach().cpu(),
-                                        env.dof_pos[:,:12].detach().cpu(), env.dof_vel[:,:12].detach().cpu()], dim=-1) # (500,42)
+                                        env.clock_inputs.detach().cpu(),
+                                        env.dof_pos[:,:12].detach().cpu(), env.dof_vel[:,:12].detach().cpu()], dim=-1) # (500,41)
             this_reward = torch.stack([torch.tensor(gait_index), x_vel_cmd, y_vel_cmd, yaw_vel_cmd], dim=-1) # (500,4) size this_reward
 
             recorded_obs.append(this_obs)
@@ -201,7 +202,7 @@ def save(headless=True):
             recorded_acts = torch.cat(sliced_acts, axis=0)
             recorded_rewards = torch.cat(sliced_rewards, axis=0)
 
-        recorded_obs = recorded_obs.view(-1, 42)
+        recorded_obs = recorded_obs.view(-1, 41)
         recorded_acts = recorded_acts.view(-1, 12)
         recorded_rewards = recorded_rewards.view(-1, 4)
 
@@ -213,7 +214,7 @@ def save(headless=True):
     action_ = torch.cat(action_, dim=0)
     reward_ = torch.cat(reward_, dim=0)
 
-    state_ = state_.view(-1, 42)
+    state_ = state_.view(-1, 41)
     action_ = action_.view(-1, 12)
     reward_ = reward_.view(-1, 4)
 
